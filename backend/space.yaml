@@ -1,0 +1,10 @@
+# Hugging Face Spaces configuration.
+# Copy these fields into the README front-matter of your Space, or use this as
+# a reference. Spaces reads the YAML front-matter from README.md.
+title: YT Download API
+emoji: "\U0001F4E5"
+colorFrom: purple
+colorTo: indigo
+sdk: docker
+app_port: 7860
+pinned: false
