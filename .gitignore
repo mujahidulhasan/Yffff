@@ -1,0 +1,6 @@
+# Root-level ignores
+.DS_Store
+*.log
+.env
+.idea/
+.vscode/
