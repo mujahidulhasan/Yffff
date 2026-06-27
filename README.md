@@ -1,93 +1,159 @@
-# yt-download
+# Multi-Platform Video Downloader
 
+A production-grade, mobile-first web app to download **video, audio, thumbnails,
+subtitles, and metadata** from any site supported by
+[yt-dlp](https://github.com/yt-dlp/yt-dlp).
 
+- **Frontend:** Next.js 15 (App Router) + TypeScript + Tailwind CSS + Framer Motion → deploys to **Vercel**
+- **Backend:** FastAPI (Python 3.12) + yt-dlp + FFmpeg + Uvicorn → deploys to **Hugging Face Spaces** (Docker)
+- **Merging:** Server-side FFmpeg is the primary workflow. FFmpeg.wasm is wired in as an optional client-side fallback only.
+- **No permanent storage:** Files live in `/tmp` and are auto-deleted by a background cleanup task.
 
-## Getting started
+> **Legal note:** Downloading content may violate the Terms of Service of some
+> platforms and may infringe copyright. Only download content you own or have
+> the right to download. You are responsible for how you deploy and use this software.
 
-To make it easy for you to get started with GitLab, here's a list of recommended next steps.
+## Repository structure
 
-Already a pro? Just edit this README.md and make it your own. Want to make it easy? [Use the template at the bottom](#editing-this-readme)!
-
-## Add your files
-
-* [Create](https://docs.gitlab.com/user/project/repository/web_editor/#create-a-file) or [upload](https://docs.gitlab.com/user/project/repository/web_editor/#upload-a-file) files
-* [Add files using the command line](https://docs.gitlab.com/topics/git/add_files/#add-files-to-a-git-repository) or push an existing Git repository with the following command:
-
+```text
+.
+├─ backend/                     FastAPI service (Hugging Face Spaces)
+│  ├─ app/
+│  │  ├─ api/routes.py          REST endpoints
+│  │  ├─ core/                  config + logging
+│  │  ├─ middleware/            rate limiting
+│  │  ├─ models/schemas.py      Pydantic request/response models
+│  │  ├─ services/              extractor, downloader, queue, cleanup
+│  │  └─ main.py                app factory + lifespan
+│  ├─ Dockerfile
+│  ├─ requirements.txt
+│  ├─ packages.txt
+│  └─ .env.example
+└─ frontend/                    Next.js 15 app (Vercel)
+   ├─ src/
+   │  ├─ app/                   App Router pages + layout
+   │  ├─ components/            UI + feature components
+   │  ├─ hooks/                 progress poller, ffmpeg.wasm
+   │  ├─ lib/                   API client + utils
+   │  ├─ store/                 Zustand stores (queue + history)
+   │  └─ types/                 shared API types
+   ├─ public/                   PWA manifest + service worker
+   ├─ vercel.json
+   └─ .env.example
 ```
-cd existing_repo
-git remote add origin https://gitlab.com/jahidkhan-group/yt-download.git
-git branch -M main
-git push -uf origin main
+
+## API endpoints
+
+| Method | Path                      | Description                              |
+| ------ | ------------------------- | ---------------------------------------- |
+| POST   | `/api/extract`            | Returns metadata, thumbnail, formats     |
+| POST   | `/api/download`           | Starts a download job, returns `job_id`  |
+| GET    | `/api/progress/{job_id}`  | Live progress (percent, speed, ETA, stage)|
+| GET    | `/api/file/{job_id}`      | Streams the completed file               |
+| GET    | `/api/health`             | Health check (+ ffmpeg availability)     |
+| GET    | `/api/platforms`          | Supported platform count from yt-dlp     |
+
+## Features
+
+- URL validation + unsupported-URL detection (via yt-dlp extractor matching)
+- Metadata preview: title, thumbnail, duration, uploader, upload date, views, platform
+- Format selection: best quality, video-only, audio-only, MP3/M4A/WAV conversion, thumbnails, subtitles, playlists
+- Live progress: percentage, speed, ETA, stage, merge progress
+- Queue with max **3** concurrent jobs (enforced on both client and server)
+- History in browser `localStorage`
+- Backend: rate limiting, queue management, automatic `/tmp` cleanup, retry logic, structured logging, health endpoint, CORS
+- Dark / light mode, PWA support, loading skeletons, toast notifications, error boundaries
+
+## Local development
+
+### Backend
+
+```bash
+cd backend
+python -m venv .venv && source .venv/bin/activate
+pip install -r requirements.txt
+# Install ffmpeg on the host: e.g. `sudo apt-get install ffmpeg` or `brew install ffmpeg`
+cp .env.example .env
+uvicorn app.main:app --reload --port 7860
 ```
 
-## Integrate with your tools
+API docs: http://localhost:7860/docs
 
-* [Set up project integrations](https://gitlab.com/jahidkhan-group/yt-download/-/settings/integrations)
+### Frontend
 
-## Collaborate with your team
+```bash
+cd frontend
+npm install
+cp .env.example .env.local
+# Set NEXT_PUBLIC_API_BASE_URL to http://localhost:7860 for local dev
+npm run dev
+```
 
-* [Invite team members and collaborators](https://docs.gitlab.com/user/project/members/)
-* [Create a new merge request](https://docs.gitlab.com/user/project/merge_requests/creating_merge_requests/)
-* [Automatically close issues from merge requests](https://docs.gitlab.com/user/project/issues/managing_issues/#closing-issues-automatically)
-* [Enable merge request approvals](https://docs.gitlab.com/user/project/merge_requests/approvals/)
-* [Set auto-merge](https://docs.gitlab.com/user/project/merge_requests/auto_merge/)
+App: http://localhost:3000
 
-## Test and Deploy
+## Environment variables
 
-Use the built-in continuous integration in GitLab.
+### Backend (`backend/.env`)
 
-* [Get started with GitLab CI/CD](https://docs.gitlab.com/ci/quick_start/)
-* [Analyze your code for known vulnerabilities with Static Application Security Testing (SAST)](https://docs.gitlab.com/user/application_security/sast/)
-* [Deploy to Kubernetes, Amazon EC2, or Amazon ECS using Auto Deploy](https://docs.gitlab.com/topics/autodevops/requirements/)
-* [Use pull-based deployments for improved Kubernetes management](https://docs.gitlab.com/user/clusters/agent/)
-* [Set up protected environments](https://docs.gitlab.com/ci/environments/protected_environments/)
+| Variable                   | Default            | Description                              |
+| -------------------------- | ------------------ | ---------------------------------------- |
+| `ENVIRONMENT`              | `production`       | Runtime environment label                |
+| `LOG_LEVEL`                | `INFO`             | Logging level                            |
+| `CORS_ORIGINS`             | `*`                | Comma-separated allowed origins          |
+| `MAX_CONCURRENT_JOBS`      | `3`                | Max simultaneous download jobs           |
+| `JOB_TTL_SECONDS`          | `1800`             | Lifetime before files are cleaned up     |
+| `DOWNLOAD_DIR`             | `/tmp/yt-download` | Temp download directory                  |
+| `CLEANUP_INTERVAL_SECONDS` | `300`              | Cleanup loop interval                    |
+| `RATE_LIMIT_REQUESTS`      | `30`               | Requests per window per IP               |
+| `RATE_LIMIT_WINDOW_SECONDS`| `60`               | Rate-limit window size                   |
+| `EXTRACT_RETRIES`          | `3`                | yt-dlp extract retries                   |
+| `DOWNLOAD_RETRIES`         | `3`                | yt-dlp download retries                  |
+| `MAX_FILESIZE_MB`          | `2048`             | Max single-file size                     |
 
-***
+### Frontend (`frontend/.env.local`)
 
-# Editing this README
+| Variable                   | Description                                   |
+| -------------------------- | --------------------------------------------- |
+| `NEXT_PUBLIC_API_BASE_URL` | Base URL of the backend (HF Space URL)        |
+| `NEXT_PUBLIC_SITE_URL`     | Public site URL, used for sitemap (optional)  |
 
-When you're ready to make this README your own, just edit this file and use the handy template below (or feel free to structure it however you want - this is just a starting point!). Thanks to [makeareadme.com](https://www.makeareadme.com/) for this template.
+## Deployment
 
-## Suggestions for a good README
+### Backend → Hugging Face Spaces (Docker)
 
-Every project is different, so consider which of these sections apply to yours. The sections used in the template are suggestions for most open source projects. Also keep in mind that while a README can be too long and detailed, too long is better than too short. If you think your README is too long, consider utilizing another form of documentation rather than cutting out information.
+1. Create a new Space → **SDK: Docker**.
+2. Push the contents of `backend/` to the Space repo (root must contain the `Dockerfile`).
+3. Add this YAML front-matter at the top of the Space's `README.md` (see `backend/space.yaml`):
+   ```yaml
+   ---
+   title: YT Download API
+   emoji: 📥
+   colorFrom: purple
+   colorTo: indigo
+   sdk: docker
+   app_port: 7860
+   ---
+   ```
+4. In **Settings → Variables and secrets**, set `CORS_ORIGINS` to your Vercel URL.
+5. The Space builds the image (FFmpeg installed via apt) and serves on port `7860`.
+   Your API base URL will be `https://<user>-<space>.hf.space`.
 
-## Name
-Choose a self-explaining name for your project.
+### Frontend → Vercel
 
-## Description
-Let people know what your project can do specifically. Provide context and add a link to any reference visitors might be unfamiliar with. A list of Features or a Background subsection can also be added here. If there are alternatives to your project, this is a good place to list differentiating factors.
+1. Import the repository into Vercel and set the **Root Directory** to `frontend`.
+2. Framework preset: **Next.js** (auto-detected). Build command `next build`.
+3. Add environment variable `NEXT_PUBLIC_API_BASE_URL` = your Hugging Face Space URL.
+4. Deploy. The COOP/COEP headers required for FFmpeg.wasm are configured in `vercel.json` and `next.config.mjs`.
 
-## Badges
-On some READMEs, you may see small images that convey metadata, such as whether or not all the tests are passing for the project. You can use Shields to add some to your README. Many services also have instructions for adding a badge.
+## How platform support works
 
-## Visuals
-Depending on what you are making, it can be a good idea to include screenshots or even a video (you'll frequently see GIFs rather than actual videos). Tools like ttygif can help, but check out Asciinema for a more sophisticated method.
-
-## Installation
-Within a particular ecosystem, there may be a common way of installing things, such as using Yarn, NuGet, or Homebrew. However, consider the possibility that whoever is reading your README is a novice and would like more guidance. Listing specific steps helps remove ambiguity and gets people to using your project as quickly as possible. If it only runs in a specific context like a particular programming language version or operating system or has dependencies that have to be installed manually, also add a Requirements subsection.
-
-## Usage
-Use examples liberally, and show the expected output if you can. It's helpful to have inline the smallest example of usage that you can demonstrate, while providing links to more sophisticated examples if they are too long to reasonably include in the README.
-
-## Support
-Tell people where they can go to for help. It can be any combination of an issue tracker, a chat room, an email address, etc.
-
-## Roadmap
-If you have ideas for releases in the future, it is a good idea to list them in the README.
-
-## Contributing
-State if you are open to contributions and what your requirements are for accepting them.
-
-For people who want to make changes to your project, it's helpful to have some documentation on how to get started. Perhaps there is a script that they should run or some environment variables that they need to set. Make these steps explicit. These instructions could also be useful to your future self.
-
-You can also document commands to lint the code or run tests. These steps help to ensure high code quality and reduce the likelihood that the changes inadvertently break something. Having instructions for running tests is especially helpful if it requires external setup, such as starting a Selenium server for testing in a browser.
-
-## Authors and acknowledgment
-Show your appreciation to those who have contributed to the project.
+The backend never hardcodes platforms. It relies on yt-dlp's extractor
+registry: `/api/platforms` counts `yt_dlp.extractor.gen_extractors()`, and
+extraction uses automatic extractor detection. Any site yt-dlp supports works,
+including YouTube, TikTok, Instagram, Facebook, X/Twitter, Reddit, Vimeo,
+Dailymotion, Twitch, SoundCloud, and Bilibili.
 
 ## License
-For open source projects, say how it is licensed.
 
-## Project status
-If you have run out of energy or time for your project, put a note at the top of the README saying that development has slowed down or stopped completely. Someone may choose to fork your project or volunteer to step in as a maintainer or owner, allowing your project to keep going. You can also make an explicit request for maintainers.
+Provided as-is. Ensure your usage complies with the terms of service of the
+sites you access and with applicable copyright law.
